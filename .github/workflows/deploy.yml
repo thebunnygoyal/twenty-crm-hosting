@@ -1,0 +1,56 @@
+name: Deploy Twenty CRM to Azure
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  AZURE_RESOURCE_GROUP: twenty-crm-rg
+  AZURE_CONTAINER_NAME: twenty-crm-app
+  
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    - name: Deploy to Azure Container Instances
+      run: |
+        # Check if container exists and delete if it does
+        if az container show --resource-group $AZURE_RESOURCE_GROUP --name $AZURE_CONTAINER_NAME >/dev/null 2>&1; then
+          echo "Deleting existing container..."
+          az container delete --resource-group $AZURE_RESOURCE_GROUP --name $AZURE_CONTAINER_NAME --yes
+        fi
+        
+        # Deploy new container
+        az container create \
+          --resource-group $AZURE_RESOURCE_GROUP \
+          --name $AZURE_CONTAINER_NAME \
+          --image twentycrm/twenty:latest \
+          --dns-name-label twenty-crm-${{ github.run_number }} \
+          --ports 3000 \
+          --cpu 2 \
+          --memory 4 \
+          --environment-variables \
+            NODE_PORT=3000 \
+            SERVER_URL="${{ secrets.SERVER_URL }}" \
+            PG_DATABASE_URL="${{ secrets.PG_DATABASE_URL }}" \
+            REDIS_URL="${{ secrets.REDIS_URL }}" \
+            APP_SECRET="${{ secrets.APP_SECRET }}" \
+            ACCESS_TOKEN_SECRET="${{ secrets.ACCESS_TOKEN_SECRET }}" \
+            LOGIN_TOKEN_SECRET="${{ secrets.LOGIN_TOKEN_SECRET }}" \
+            REFRESH_TOKEN_SECRET="${{ secrets.REFRESH_TOKEN_SECRET }}"
+            
+    - name: Get deployment URL
+      run: |
+        URL=$(az container show --resource-group $AZURE_RESOURCE_GROUP --name $AZURE_CONTAINER_NAME --query "ipAddress.fqdn" -o tsv)
+        echo "Twenty CRM deployed at: http://$URL:3000"
+        echo "::notice title=Deployment URL::http://$URL:3000"
